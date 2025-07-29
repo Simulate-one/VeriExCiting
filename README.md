@@ -1,124 +1,130 @@
-# VeriExCite: Verify Existing Citations
+# VeriExCite with OpenRouter Support
 
-[![Python Version](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/) [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+## 🔗 Original Project Attribution
 
-**VeriExCite** is a Python tool designed to help you verify the existence of citations in academic papers (PDF format). It extracts the bibliography section from a PDF, parses individual references, and then checks their validity against Crossref, Google Scholar, Arxiv, and Google Search.
+This project is a fork of [**VeriExCiting**](https://github.com/ykangw/VeriExCiting) by [@ykangw](https://github.com/ykangw).
 
-## Try the Web App (Recommended!)
+**Original Project**: https://github.com/ykangw/VeriExCiting  
+**Original Web App**: https://veriexcite.streamlit.app/  
+**License**: AGPL-3.0
 
-For quick and easy verification, use our web app: [https://veriexcite.streamlit.app/](https://veriexcite.streamlit.app/) [![VeriExCite Web App Screenshot](images/streamlit_screenshot.png)](https://veriexcite.streamlit.app/) The web app allows you to upload one or more PDF files directly and see the results in your browser. No installation required!
+## 🆕 Added Features
 
-## Why VeriExCite?
+This fork adds **OpenRouter API support** to the original VeriExCiting tool, providing access to multiple AI models:
 
-The rise of powerful Large Language Models (LLMs) has brought with it the potential for generating realistic-looking, yet entirely fabricated, academic references. While tools like ZeroGPT attempt to detect LLM-generated text, they rely on "black box" deep learning methods, which are prone to both false positives and false negatives, making them unreliable for definitive judgments. However, the presence of fabricated references within a manuscript provides _concrete_ evidence that (at least part) of the text may be LLM-generated. **VeriExCite** focuses on this crucial aspect of academic integrity. It helps academics, teaching assistants, and researchers quickly identify potentially problematic citations.
+### New Features Added:
+- ✅ **OpenRouter Integration**: Support for multiple AI models via [OpenRouter](https://openrouter.ai/)
+- ✅ **Model Selection**: Choose from Claude 3.5 Sonnet, GPT-4o, GPT-4o Mini, and more
+- ✅ **Dual API Support**: Keep original Google Gemini support alongside OpenRouter
+- ✅ **Improved JSON Parsing**: Better handling of different API response formats
+- ✅ **Enhanced UI**: Updated interface for API provider and model selection
+- ✅ **Better Error Handling**: More detailed error messages and debugging information
 
-This flowchart illustrates the VeriExCite process: ![VeriExCite Flowchart](images/flowchart.drawio.png)
+### Supported Models (via OpenRouter):
+- **Claude 3.5 Sonnet** (anthropic/claude-3.5-sonnet)
+- **Claude 3 Haiku** (anthropic/claude-3-haiku)  
+- **GPT-4o** (openai/gpt-4o)
+- **GPT-4o Mini** (openai/gpt-4o-mini)
+- **GPT-4 Turbo** (openai/gpt-4-turbo)
+- **Gemma 2 27B** (google/gemma-2-27b-it)
+- **LLaMA 3.1 8B** (meta-llama/llama-3.1-8b-instruct)
 
-## Features
+## 🚀 Quick Start
 
-- **Extraction:** Extracts the bibliography section from PDF documents.
-- **Parsing:** Uses Google Gemini API to parse references into structured data (title, authors, DOI, type, etc.)
-- **Verification:**
-  - Checks academic references against Crossref, Google Scholar, and Arxiv.
-  - Checks website references using their URL and Google Search.
-  - Identifies potentially fabricated citations.
-- **Reporting:**
-  - Provides a summary of verified and potentially fabricated references.
-  - Outputs results to a CSV file for easy analysis.
-- **Folder Processing:** Processes all PDF files in a directory in a single run, suitable for academics and teaching assistants in marking scenarios.
-- **Privacy-Conscious:** Only the bibliography section of the PDF is sent to the Google Gemini API. This is crucial for complying with university policies that often prohibit uploading student work (which students hold copyright for) to third-party LLM services. The full text of the paper _is never_ uploaded.
+### Prerequisites
+- Python 3.13+ (recommended)
+- Conda or virtual environment
 
-## Usage
+### Installation
 
-While [the web app](https://veriexcite.streamlit.app/) is the easiest way to use VeriExCite, you can also run it locally with Python.
-
-#### Prerequisites
-
-- Python 3.10 or higher
-- [uv](https://github.com/astral-sh/uv) - Fast Python package installer and resolver
-
-#### Steps
-
-1. Clone the repository:
-
+1. **Clone this repository**:
 ```bash
-git clone https://github.com/ykangw/VeriExCiting.git
-cd VeriExciting
+git clone <your-repo-url>
+cd VeriExCiting-OpenRouter
 ```
 
-2. Install dependencies using uv:
-
+2. **Create and activate environment**:
 ```bash
-uv pip install .
+conda create -n veriexciting python=3.13 -y
+conda activate veriexciting
 ```
 
-3. Run the Streamlit app:
+3. **Install dependencies**:
+```bash
+pip install .
+```
 
+4. **Run the application**:
 ```bash
 streamlit run streamlit_app.py
 ```
 
-**Set Google Gemini API Key:**
+## 🔑 API Keys
 
-- Obtain an API key from [Google AI Studio](https://ai.google.dev/aistudio). It's free up to 1500 requests per day!
-- Set your API key with `set_google_api_key` function.
+### Option 1: OpenRouter (Recommended)
+- Get your API key at [OpenRouter](https://openrouter.ai/)
+- Supports multiple models with competitive pricing
+- More reliable and flexible than single-provider APIs
 
-**Single PDF File**
+### Option 2: Google Gemini (Original)
+- Get your API key at [Google AI Studio](https://ai.google.dev/aistudio)
+- Free tier: 1500 requests per day
+- Original functionality from the base project
 
-```python
-from veriexcite import set_google_api_key, veriexcite
+## 📖 How to Use
 
-GOOGLE_API_KEY = "YOUR_API_KEY"
-set_google_api_key(GOOGLE_API_KEY)
+1. **Choose API Provider**: Select between OpenRouter or Google Gemini
+2. **Select Model** (if using OpenRouter): Pick your preferred AI model
+3. **Enter API Key**: Input your API key or use developer key for trial
+4. **Upload PDF**: Upload one or more academic papers
+5. **Start Verification**: Click to begin citation verification process
 
-pdf_path = "path/to/your/paper.pdf"
-count_verified, count_warning, list_warning, list_explanations = veriexcite(pdf_path)
+## 🎯 What This Tool Does
 
-print(f"{count_verified} references validated, {count_warning} warnings.")
+**VeriExCite** helps detect AI-generated fake citations in academic papers by:
 
-if count_warning > 0:
-    print("Warning List:")
-    for item in list_warning:
-        print(item)
+- **Extracting** bibliography sections from PDF documents
+- **Parsing** references using AI (now with multiple model options)
+- **Verifying** citations against:
+  - Crossref database
+  - Google Scholar
+  - ArXiv
+  - Direct URL checking
+- **Reporting** validation status with detailed explanations
 
-print("\nExplanations:")
-for explanation in list_explanations:
-    print(explanation)
-```
+## 📊 Understanding Results
 
-**Process a Folder of PDFs**
+- ✅ **Validated**: Citation found and verified in academic databases
+- ❌ **Invalid**: Citation has errors (e.g., DOI mismatch)
+- ⚠️ **Not Found**: Citation could not be verified (manual check recommended)
 
-```python
-from veriexcite import set_google_api_key, process_folder
+## 🤝 Contributing
 
-GOOGLE_API_KEY = "YOUR_API_KEY"
-set_google_api_key(GOOGLE_API_KEY)
+This is a community fork focused on adding OpenRouter support. For core functionality improvements, please consider contributing to the [original project](https://github.com/ykangw/VeriExCiting).
 
-folder_path = "path/to/your/pdf/folder"
-process_folder(folder_path)
-```
+For OpenRouter-specific features or bugs:
+1. Fork this repository
+2. Create a feature branch
+3. Submit a pull request
 
-This creates a `VeriExCite results.csv` file in the current directory, including explanations for each reference.
+## 📜 License
 
-## Interpreting Results
+This fork maintains the same **AGPL-3.0 license** as the original project.
 
-- **Found References:** The total number of references extracted from the bibliography section of the PDF.
-- **Validated:** References that were successfully matched in Crossref, Google Scholar, Arxiv (academic references), and Google Search (non-academic websites). If a DOI is provided and matches, the reference is strongly validated. If a DOI is provided but does not match, the reference is flagged as **Invalid**.
-- **Invalid:** References that are explicitly flagged as incorrect, such as when a DOI is provided but does not match the Crossref record, or when author/title do not match authoritative sources.
-- **Not Found (unverified):** References that could _not_ be verified in any source.
-- **Warning List:** The raw text of the unverified or invalid references.
-- **Explanations:** For each reference, a detailed explanation is provided, indicating the reason for its status (e.g., "DOI does not match Crossref record", "Author and title match Google Scholar", etc.).
+## 🙏 Acknowledgments
 
-> [!IMPORTANT]
->
-> A "warning" or "invalid" from VeriExCite indicates suspicion. Manual verification is always required. The tool now provides detailed explanations for each reference, making it easier to understand why a reference was flagged.
+- **Original Author**: [@ykangw](https://github.com/ykangw) for creating VeriExCiting
+- **Original Project**: [VeriExCiting](https://github.com/ykangw/VeriExCiting)
+- **OpenRouter**: For providing multi-model API access
+- **Community**: For testing and feedback
 
-## Streamlit App Output
+## 🔗 Links
 
-The Streamlit app now displays:
-- **Status**: Shows one of ✅Validated, ❌Invalid, or ⚠️Not Found for each reference.
-- **Explanation**: Shows the reason for the status, such as DOI mismatch, author/title match, or not found in any source.
+- **Original Project**: https://github.com/ykangw/VeriExCiting
+- **Original Web App**: https://veriexcite.streamlit.app/
+- **OpenRouter**: https://openrouter.ai/
+- **Google AI Studio**: https://ai.google.dev/aistudio
 
-## Contributing
+---
 
-Contributions are welcome! Please feel free to submit issues or pull requests.
+> **Note**: This fork focuses on adding OpenRouter support while maintaining all original functionality. For the most up-to-date core features, please check the [original repository](https://github.com/ykangw/VeriExCiting).

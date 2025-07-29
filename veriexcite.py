@@ -9,6 +9,7 @@ from scholarly import scholarly
 import logging
 from typing import List, Tuple
 from tenacity import retry, stop_after_attempt, wait_exponential
+from openai import OpenAI
 from google import genai
 from google.genai.types import Tool, GoogleSearch, ThinkingConfig
 from bs4 import BeautifulSoup
@@ -16,12 +17,28 @@ from rapidfuzz import fuzz
 from enum import Enum
 
 # --- Configuration ---
+OPENROUTER_API_KEY = None
 GOOGLE_API_KEY = None
+openai_client = None
+selected_model = "anthropic/claude-3.5-sonnet"
+api_provider = "openrouter"  # "openrouter" or "gemini"
+
+def set_openrouter_api_key(api_key: str, model: str = "anthropic/claude-3.5-sonnet"):
+    """Set OpenRouter API key and model."""
+    global OPENROUTER_API_KEY, openai_client, selected_model, api_provider
+    OPENROUTER_API_KEY = api_key
+    selected_model = model
+    api_provider = "openrouter"
+    openai_client = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=api_key,
+    )
 
 def set_google_api_key(api_key: str):
     """Set Google Gemini API key."""
-    global GOOGLE_API_KEY
+    global GOOGLE_API_KEY, api_provider
     GOOGLE_API_KEY = api_key
+    api_provider = "gemini"
 
 
 # --- Step 1: Read PDF and extract bibliography section ---
@@ -109,21 +126,86 @@ def split_references(bib_text):
     - Bib: Normalised input bibliography (correct format, in one line)\n\n
     """
 
-    client = genai.Client(api_key=GOOGLE_API_KEY)
-    response = client.models.generate_content(
-        model='gemini-2.5-flash',
-        contents=prompt + bib_text,
-        config={
-            'response_mime_type': 'application/json',
-            'response_schema': list[ReferenceExtraction],
-            'temperature': 0,
-            'thinking_config': ThinkingConfig(thinking_budget=0),
-        },
-    )
-
-    # print(response.text)  # JSON string.
-    references: list[ReferenceExtraction] = response.parsed  # Parsed JSON.
-    return references
+    import json
+    import re
+    
+    if api_provider == "gemini":
+        if not GOOGLE_API_KEY:
+            raise ValueError("Google API key not set. Please call set_google_api_key() first.")
+        
+        client = genai.Client(api_key=GOOGLE_API_KEY)
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt + bib_text,
+            config={
+                'response_mime_type': 'application/json',
+                'response_schema': list[ReferenceExtraction],
+                'temperature': 0,
+                'thinking_config': ThinkingConfig(thinking_budget=0),
+            },
+        )
+        references: list[ReferenceExtraction] = response.parsed
+        return references
+        
+    elif api_provider == "openrouter":
+        if not openai_client:
+            raise ValueError("OpenRouter API key not set. Please call set_openrouter_api_key() first.")
+        
+        response = openai_client.chat.completions.create(
+            model=selected_model,
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that processes bibliography data. You must respond with ONLY a valid JSON array, no additional text or explanations."},
+                {"role": "user", "content": prompt + bib_text + "\n\nRespond with ONLY a JSON array of objects, each containing: title, author, doi, url, year, type, bib. Do not include any explanatory text."}
+            ],
+            temperature=0,
+        )
+        
+        try:
+            response_text = response.choices[0].message.content.strip()
+            
+            # Clean the response - remove markdown formatting
+            if response_text.startswith("```json"):
+                response_text = response_text.strip("```json").strip("```").strip()
+            elif response_text.startswith("```"):
+                response_text = response_text.strip("```").strip()
+            
+            # Extract JSON from response - handle cases where model adds extra text
+            json_match = re.search(r'(\[.*\])', response_text, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(1)
+            else:
+                # If no array found, try to find object with references key
+                json_match = re.search(r'\{.*"references":\s*(\[.*\]).*\}', response_text, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(1)
+                else:
+                    json_str = response_text
+            
+            # Parse the JSON
+            references_data = json.loads(json_str)
+            
+            # Fix field names - convert lowercase to uppercase for DOI and URL
+            for ref in references_data:
+                if 'doi' in ref:
+                    ref['DOI'] = ref.pop('doi')
+                if 'url' in ref:
+                    ref['URL'] = ref.pop('url')
+                # Ensure all required fields exist
+                if 'DOI' not in ref:
+                    ref['DOI'] = ''
+                if 'URL' not in ref:
+                    ref['URL'] = ''
+            
+            references = [ReferenceExtraction(**ref) for ref in references_data]
+            return references
+            
+        except (json.JSONDecodeError, Exception) as e:
+            print(f"Error parsing response: {e}")
+            print(f"Response text: {response.choices[0].message.content}")
+            return []
+    
+    else:
+        raise ValueError(f"Unknown API provider: {api_provider}")
 
 
 # --- Step 3: Verify each reference using crossref and compare title ---
@@ -275,35 +357,25 @@ def search_title_workshop_paper(ref: ReferenceExtraction) -> ReferenceCheckResul
         if not is_likely_workshop:
             return ReferenceCheckResult(status=ReferenceStatus.NOT_FOUND, explanation="Not a workshop paper.")
             
-        # Use Google search through the Google Gemini API with more specific prompt
-        prompt = f"""
-        Please search for this exact workshop paper and verify it exists:
-        Title: {ref.title}
-        Author: {ref.author}
-        Year: {ref.year}
+        # Simplified heuristic approach for workshop papers
+        # Since we can't use Google Search API, we'll use a more conservative approach
+        # Workshop papers are often harder to verify, so we'll mark them as "not found"
+        # unless they have a DOI or URL that can be verified
         
-        This paper appears to be from a workshop or symposium. Check conferences, workshops, 
-        and personal/university pages. Return 'True' only if you can find evidence this 
-        specific workshop paper exists (exact title and author match). Return 'False' otherwise.
-        Return only 'True' or 'False', without any additional explanation.
-        """
-
-        client = genai.Client(api_key=GOOGLE_API_KEY)
-        google_search_tool = Tool(google_search=GoogleSearch())
-        response = client.models.generate_content(
-            model='gemini-2.0-flash',
-            contents=prompt,
-            config={
-                'tools': [google_search_tool],
-                'temperature': 0,
-            },
-        )
-
-        answer = normalize_title(response.candidates[0].content.parts[0].text)
-        if answer.startswith('true') or answer.endswith('true'):
-            return ReferenceCheckResult(status=ReferenceStatus.VALIDATED, explanation="Workshop paper found via Google search.")
-        else:
-            return ReferenceCheckResult(status=ReferenceStatus.NOT_FOUND, explanation="Workshop paper not found via Google search.")
+        if ref.DOI:
+            # If it has a DOI, try to verify through CrossRef
+            crossref_result = search_title_crossref(ref)
+            if crossref_result.status == ReferenceStatus.VALIDATED:
+                return ReferenceCheckResult(status=ReferenceStatus.VALIDATED, explanation="Workshop paper validated via CrossRef DOI.")
+        
+        if ref.URL:
+            # If it has a URL, try to verify the URL
+            url_result = verify_url(ref)
+            if url_result.status == ReferenceStatus.VALIDATED:
+                return ReferenceCheckResult(status=ReferenceStatus.VALIDATED, explanation="Workshop paper validated via URL.")
+        
+        # Without Google Search API, we cannot reliably verify workshop papers
+        return ReferenceCheckResult(status=ReferenceStatus.NOT_FOUND, explanation="Workshop paper verification requires manual checking (Google Search not available).")
             
     except Exception as e:
         logging.warning(f"Workshop paper search failed for title '{ref.title}': {e}")
@@ -344,30 +416,31 @@ def verify_url(ref: ReferenceExtraction) -> ReferenceCheckResult:
 
 
 def search_title_google(ref: ReferenceExtraction) -> ReferenceCheckResult:
-    """Searches for a title using Google Search and match using a LLM model."""
-
-    prompt = f"""
-    Please search for the reference on Google, compare with research results, and determine if it is genuine.\n
-    Return 'True' only if a website with the the exact title and author is found. Otherwise, return 'False'.\n
-    Return only 'True' or 'False', without any additional information.\n\n
-    Author: {ref.author}\n
-    Title: {ref.title}\n"""
-
-    client = genai.Client(api_key=GOOGLE_API_KEY)
-    google_search_tool = Tool(google_search=GoogleSearch())
-    response = client.models.generate_content(
-        model='gemini-2.0-flash',
-        contents=prompt,
-        config={
-            'tools': [google_search_tool],
-        },
-    )
-
-    answer = normalize_title(response.candidates[0].content.parts[0].text)
-    if answer.startswith('true') or answer.endswith('true'):
-        return ReferenceCheckResult(status=ReferenceStatus.VALIDATED, explanation="Google search found matching reference.")
-    else:
-        return ReferenceCheckResult(status=ReferenceStatus.NOT_FOUND, explanation="Google search did not find matching reference.")
+    """Simplified reference verification without Google Search API."""
+    
+    # Without Google Search API, we can only do basic checks
+    # This is a fallback function that relies on other verification methods
+    
+    # If it's a website, try URL verification
+    if ref.type == "non_academic_website" and ref.URL:
+        return verify_url(ref)
+    
+    # If it has a DOI, try CrossRef
+    if ref.DOI:
+        crossref_result = search_title_crossref(ref)
+        if crossref_result.status == ReferenceStatus.VALIDATED:
+            return crossref_result
+    
+    # Try Google Scholar as a fallback
+    try:
+        scholar_result = search_title_google_scholar(ref)
+        if scholar_result.status == ReferenceStatus.VALIDATED:
+            return scholar_result
+    except Exception as e:
+        logging.warning(f"Google Scholar search failed: {e}")
+    
+    # If we can't verify through other means, mark as not found
+    return ReferenceCheckResult(status=ReferenceStatus.NOT_FOUND, explanation="Reference verification requires manual checking (Google Search API not available).")
 
 def search_title(ref: ReferenceExtraction) -> ReferenceCheckResult:
     """Searches for a title using multiple methods."""

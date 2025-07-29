@@ -3,7 +3,8 @@ from veriexcite import (
     extract_bibliography_section,
     split_references,
     search_title,
-    set_google_api_key,
+    set_openrouter_api_key,
+    set_google_api_key,  # Keep for backward compatibility
     ReferenceStatus,  # new import
 )
 import io
@@ -33,9 +34,23 @@ def process_and_verify(bib_text: str, keywords=["Reference", "Bibliography", "Wo
 
     try:
         references = split_references(bib_text)
-    except ValueError as e:
-        st.error(str(e))
-        return pd.DataFrame()
+        if not references:
+            st.warning("No references were extracted from the bibliography section. This could be due to:")
+            st.write("- The bibliography section was not found or is empty")
+            st.write("- The API failed to parse the references")
+            st.write("- The text format is not recognizable")
+            return pd.DataFrame(columns=[
+                "Index", "First Author", "Year", "Title", "Type", "DOI", "URL", "Raw Text", "Status", "Explanation"
+            ])
+    except Exception as e:
+        st.error(f"Error processing references: {str(e)}")
+        st.write("This could be due to:")
+        st.write("- Invalid API key")
+        st.write("- API service unavailable")
+        st.write("- Network connectivity issues")
+        return pd.DataFrame(columns=[
+            "Index", "First Author", "Year", "Title", "Type", "DOI", "URL", "Raw Text", "Status", "Explanation"
+        ])
 
     ref_type_dict = {"journal_article": "Journal Article", "preprint": "Preprint", "conference_paper": "Conference Paper",
                      "book": "Book", "book_chapter": "Book Chapter", "non_academic_website": "Website"}
@@ -61,13 +76,19 @@ def process_and_verify(bib_text: str, keywords=["Reference", "Bibliography", "Wo
             "Explanation": "Pending"
         })
 
-    df = pd.DataFrame(results)
-
-    # if URL is empty, and DOI is not empty: if DOI start wih https://, fill url with doi. Else, fill url with doi.org link
-    df['URL'] = df.apply(
-        lambda x: x['DOI'] if pd.notna(x['DOI']) and x['DOI'] != '' and (pd.isna(x['URL']) or x['URL'] == '') and x[
-            'DOI'].startswith('https://') else f'https://doi.org/{x["DOI"]}' if pd.notna(x['DOI']) and x[
-            'DOI'] != '' and (pd.isna(x['URL']) or x['URL'] == '') else x['URL'], axis=1)
+    # Create DataFrame with default columns if results is empty
+    if not results:
+        df = pd.DataFrame(columns=[
+            "Index", "First Author", "Year", "Title", "Type", "DOI", "URL", "Raw Text", "Status", "Explanation"
+        ])
+    else:
+        df = pd.DataFrame(results)
+        
+        # if URL is empty, and DOI is not empty: if DOI start with https://, fill url with doi. Else, fill url with doi.org link
+        df['URL'] = df.apply(
+            lambda x: x['DOI'] if pd.notna(x['DOI']) and x['DOI'] != '' and (pd.isna(x['URL']) or x['URL'] == '') and x[
+                'DOI'].startswith('https://') else f'https://doi.org/{x["DOI"]}' if pd.notna(x['DOI']) and x[
+                'DOI'] != '' and (pd.isna(x['URL']) or x['URL'] == '') else x['URL'], axis=1)
 
     column_config = {
         "First Author": st.column_config.TextColumn(
@@ -126,13 +147,53 @@ def main():
         st.header("Input")
         pdf_files = st.file_uploader("Upload one or more PDF files", type="pdf", accept_multiple_files=True)
 
-        use_dev_key = st.checkbox("Use developer's API key for a trial (limited uses)")
-        st.write(
-            "You can apply for a Gemini API key at [Google AI Studio](https://ai.google.dev/aistudio) with 1500 requests per day for FREE.")
-        if use_dev_key:
-            api_key = st.secrets["GOOGLE_API_KEY"]
+        st.write("**API Configuration**")
+        api_provider = st.radio(
+            "Choose API provider:",
+            ["OpenRouter", "Google Gemini"],
+            help="OpenRouter provides access to multiple AI models including Claude, GPT-4, and others."
+        )
+        
+        if api_provider == "OpenRouter":
+            st.write(
+                "Get your OpenRouter API key at [OpenRouter](https://openrouter.ai/) - supports Claude 3.5 Sonnet, GPT-4, and many other models.")
+            
+            # Model selection
+            model_options = {
+                "Claude 3.5 Sonnet": "anthropic/claude-3.5-sonnet",
+                "Claude 3 Haiku": "anthropic/claude-3-haiku",
+                "GPT-4o": "openai/gpt-4o",
+                "GPT-4o Mini": "openai/gpt-4o-mini",
+                "GPT-4 Turbo": "openai/gpt-4-turbo",
+                "Gemma 2 27B": "google/gemma-2-27b-it",
+                "LLaMA 3.1 8B": "meta-llama/llama-3.1-8b-instruct",
+            }
+            
+            selected_model_name = st.selectbox(
+                "Select Model:",
+                options=list(model_options.keys()),
+                help="Different models have different strengths and costs"
+            )
+            selected_model = model_options[selected_model_name]
+            
+            use_dev_key = st.checkbox("Use developer's OpenRouter key for a trial (limited uses)")
+            if use_dev_key:
+                api_key = st.secrets.get("OPENROUTER_API_KEY", "")
+                if not api_key:
+                    st.warning("Developer key not available. Please enter your own API key.")
+            else:
+                api_key = st.text_input("Enter your OpenRouter API key:", type="password")
         else:
-            api_key = st.text_input("Enter your Google Gemini API key:", type="password")
+            st.write(
+                "You can apply for a Gemini API key at [Google AI Studio](https://ai.google.dev/aistudio) with 1500 requests per day for FREE.")
+            selected_model = "gemini-2.5-flash"  # Default Gemini model
+            use_dev_key = st.checkbox("Use developer's Gemini key for a trial (limited uses)")
+            if use_dev_key:
+                api_key = st.secrets.get("GOOGLE_API_KEY", "")
+                if not api_key:
+                    st.warning("Developer key not available. Please enter your own API key.")
+            else:
+                api_key = st.text_input("Enter your Google Gemini API key:", type="password")
 
     if st.sidebar.button("Start Verification"):
         if not pdf_files:
@@ -140,11 +201,17 @@ def main():
             return
 
         if not api_key:
-            st.warning("Please enter a Google Gemini API key or select 'Use developer's API key'.")
+            provider_name = "OpenRouter" if api_provider == "OpenRouter" else "Google Gemini"
+            st.warning(f"Please enter a {provider_name} API key or select 'Use developer's API key'.")
             return
 
         try:
-            set_google_api_key(api_key)
+            if api_provider == "OpenRouter":
+                set_openrouter_api_key(api_key, selected_model)
+                st.success(f"✅ Using {selected_model_name} via OpenRouter")
+            else:
+                set_google_api_key(api_key)
+                st.success("✅ Using Google Gemini")
             all_results = []
 
             for pdf_file in pdf_files:
